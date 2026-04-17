@@ -6,19 +6,15 @@ dotenv.config();
 
 const app = express();
 
-// 🔥 IMPORTANT for Render (port fix)
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-// ✅ Debug log (helps you see requests in Render logs)
 app.use((req, res, next) => {
     console.log(`Incoming: ${req.method} ${req.url}`);
     next();
 });
-
-// ✅ MAIN ROUTE
 app.post("/ask", async (req, res) => {
     try {
         const prompt = req.body.prompt;
@@ -44,7 +40,7 @@ app.post("/ask", async (req, res) => {
 
         const data = await response.json();
 
-        console.log("Gemini response:", data); // 🔥 debug
+        console.log("Gemini response:", data);
 
         const text =
             data.candidates?.[0]?.content?.parts?.[0]?.text || "No response";
@@ -62,17 +58,14 @@ app.post("/ask", async (req, res) => {
     }
 });
 
-// ✅ Root check
 app.get("/", (req, res) => {
-    res.send("Backend running 🚀");
+    res.send("Backend running");
 });
 
-// ✅ Optional: test route
 app.get("/ask", (req, res) => {
-    res.send("ASK route exists ✅");
+    res.send("ASK route exists");
 });
 
-// ❌ Remove hardcoded 3000
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
