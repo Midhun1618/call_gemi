@@ -27,7 +27,6 @@ const url =
 model +
 ":generateContent";
 
-```
 const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -53,7 +52,6 @@ return {
     response: response,
     data: data
 };
-```
 
 }
 
@@ -61,7 +59,6 @@ app.post("/ask", async (req, res) => {
 try {
 const prompt = req.body.prompt;
 
-```
     if (!prompt) {
         return res.status(400).json({
             error: "Prompt is required"
@@ -194,7 +191,6 @@ const prompt = req.body.prompt;
         error: "Server error"
     });
 }
-```
 
 });
 
