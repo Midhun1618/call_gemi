@@ -52,7 +52,6 @@ return {
     response: response,
     data: data
 };
-
 }
 
 app.post("/ask", async (req, res) => {
@@ -91,97 +90,115 @@ const prompt = req.body.prompt;
     let lastError = null;
     let hasApiKey = false;
 
-    for (let i = 0; i < configurations.length; i++) {
-        const config = configurations[i];
-
+    for (const config of configurations) {
         if (!config.apiKey) {
+            console.log("Skipping " + config.name + " because API key is missing");
             continue;
         }
 
         hasApiKey = true;
 
-        try {
-            console.log("Trying: " + config.name);
+        console.log("Trying: " + config.name);
 
+        try {
             const result = await callGemini(
                 prompt,
                 config.apiKey,
                 config.model
             );
 
-            if (result.response.ok) {
-                console.log("Success: " + config.name);
+            if (!result.response.ok) {
+                console.log(
+                    "Failed: " +
+                    config.name +
+                    " Status: " +
+                    result.response.status
+                );
 
-                const parts =
-                    result.data.candidates &&
-                    result.data.candidates[0] &&
-                    result.data.candidates[0].content &&
-                    result.data.candidates[0].content.parts;
+                console.log("Trying next fallback...");
 
-                let text = "";
+                lastError = result.data;
 
-                if (parts && parts.length > 0) {
-                    for (let j = 0; j < parts.length; j++) {
-                        if (parts[j].text) {
-                            text += parts[j].text;
-                        }
+                continue;
+            }
+
+            console.log("Success: " + config.name);
+
+            const parts =
+                result.data.candidates &&
+                result.data.candidates[0] &&
+                result.data.candidates[0].content &&
+                result.data.candidates[0].content.parts;
+
+            let text = "";
+
+            if (parts && parts.length > 0) {
+                for (const part of parts) {
+                    if (part.text) {
+                        text += part.text;
                     }
-                }
-
-                if (!text) {
-                    text = "No response";
-                }
-
-                try {
-                    const parsed = JSON.parse(text);
-                    return res.json(parsed);
-                } catch (error) {
-                    return res.json({
-                        result: text
-                    });
                 }
             }
 
-            console.error(
-                "Failed: " +
-                config.name +
-                " Status: " +
-                result.response.status
-            );
+            if (!text) {
+                console.log(
+                    "Empty response from " +
+                    config.name +
+                    ". Trying next fallback..."
+                );
 
-            console.error(result.data);
+                lastError = {
+                    error: {
+                        message: "AI returned an empty response"
+                    }
+                };
 
-            lastError = result.data;
+                continue;
+            }
+
+            console.log("Sending successful AI response to app");
+
+            return res.json({
+                result: text
+            });
 
         } catch (error) {
             console.error(
-                "Error with " +
+                "Request failed for " +
                 config.name +
                 ": " +
                 error.message
             );
+
+            console.log("Trying next fallback...");
 
             lastError = {
                 error: {
                     message: error.message
                 }
             };
+
+            continue;
         }
     }
 
     if (!hasApiKey) {
+        console.error("No Gemini API keys configured");
+
         return res.status(500).json({
             error: "No Gemini API keys configured"
         });
     }
 
+    console.error("All AI configurations failed");
+
+    console.error(
+        "Last error:",
+        lastError
+    );
+
     return res.status(503).json({
-        error:
-            lastError &&
-            lastError.error &&
-            lastError.error.message
-                ? lastError.error.message
-                : "All Gemini services are temporarily unavailable"
+        error: "AI service is temporarily unavailable. Please try again later."
     });
 
 } catch (error) {
@@ -191,6 +208,7 @@ const prompt = req.body.prompt;
         error: "Server error"
     });
 }
+
 
 });
 
