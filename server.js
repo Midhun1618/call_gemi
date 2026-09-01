@@ -5,14 +5,13 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
 app.use((req, res, next) => {
-console.log(`Incoming: ${req.method} ${req.url}`);
+console.log("Incoming: " + req.method + " " + req.url);
 next();
 });
 
@@ -23,34 +22,36 @@ const PRIMARY_MODEL = "gemini-flash-latest";
 const BACKUP_MODEL = "gemini-flash-lite-latest";
 
 async function callGemini(prompt, apiKey, model) {
-const response = await fetch(
-`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-{
-method: "POST",
-headers: {
-"Content-Type": "application/json",
-"X-goog-api-key": apiKey
-},
-body: JSON.stringify({
-contents: [
-{
-parts: [
-{
-text: prompt
-}
-]
-}
-]
-})
-}
-);
+const url =
+"https://generativelanguage.googleapis.com/v1beta/models/" +
+model +
+":generateContent";
 
 ```
+const response = await fetch(url, {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/json",
+        "X-goog-api-key": apiKey
+    },
+    body: JSON.stringify({
+        contents: [
+            {
+                parts: [
+                    {
+                        text: prompt
+                    }
+                ]
+            }
+        ]
+    })
+});
+
 const data = await response.json();
 
 return {
-    response,
-    data
+    response: response,
+    data: data
 };
 ```
 
@@ -88,13 +89,22 @@ const prompt = req.body.prompt;
             model: BACKUP_MODEL,
             name: "Backup API + Backup Model"
         }
-    ].filter(config => config.apiKey);
+    ];
 
-    let lastError;
+    let lastError = null;
+    let hasApiKey = false;
 
-    for (const config of configurations) {
+    for (let i = 0; i < configurations.length; i++) {
+        const config = configurations[i];
+
+        if (!config.apiKey) {
+            continue;
+        }
+
+        hasApiKey = true;
+
         try {
-            console.log(`Trying: ${config.name}`);
+            console.log("Trying: " + config.name);
 
             const result = await callGemini(
                 prompt,
@@ -103,35 +113,54 @@ const prompt = req.body.prompt;
             );
 
             if (result.response.ok) {
-                console.log(`Success: ${config.name}`);
+                console.log("Success: " + config.name);
 
-                const text =
-                    result.data.candidates?.[0]?.content?.parts
-                        ?.map(part => part.text || "")
-                        .join("")
-                        .trim() || "No response";
+                const parts =
+                    result.data.candidates &&
+                    result.data.candidates[0] &&
+                    result.data.candidates[0].content &&
+                    result.data.candidates[0].content.parts;
+
+                let text = "";
+
+                if (parts && parts.length > 0) {
+                    for (let j = 0; j < parts.length; j++) {
+                        if (parts[j].text) {
+                            text += parts[j].text;
+                        }
+                    }
+                }
+
+                if (!text) {
+                    text = "No response";
+                }
 
                 try {
                     const parsed = JSON.parse(text);
                     return res.json(parsed);
-                } catch {
+                } catch (error) {
                     return res.json({
                         result: text
                     });
                 }
             }
 
-            console.log(
-                `Failed: ${config.name}`,
-                result.response.status,
-                result.data
+            console.error(
+                "Failed: " +
+                config.name +
+                " Status: " +
+                result.response.status
             );
+
+            console.error(result.data);
 
             lastError = result.data;
 
         } catch (error) {
             console.error(
-                `Error with ${config.name}:`,
+                "Error with " +
+                config.name +
+                ": " +
                 error.message
             );
 
@@ -143,14 +172,23 @@ const prompt = req.body.prompt;
         }
     }
 
+    if (!hasApiKey) {
+        return res.status(500).json({
+            error: "No Gemini API keys configured"
+        });
+    }
+
     return res.status(503).json({
         error:
-            lastError?.error?.message ||
-            "All Gemini services are temporarily unavailable"
+            lastError &&
+            lastError.error &&
+            lastError.error.message
+                ? lastError.error.message
+                : "All Gemini services are temporarily unavailable"
     });
 
-} catch (err) {
-    console.error("Server error:", err);
+} catch (error) {
+    console.error("Server error:", error);
 
     return res.status(500).json({
         error: "Server error"
@@ -169,5 +207,5 @@ res.send("ASK route exists");
 });
 
 app.listen(PORT, () => {
-console.log(`Server running on port ${PORT}`);
+console.log("Server running on port " + PORT);
 });
