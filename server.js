@@ -16,9 +16,12 @@ next();
 });
 
 // Gemini configuration
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const PRIMARY_API_KEY = process.env.GEMINI_API_KEY;
+const BACKUP_API_KEY = process.env.GEMINI_BACKUP_API_KEY;
+
 const PRIMARY_MODEL = "gemini-flash-latest";
 const BACKUP_MODEL = "gemini-flash-lite-latest";
+
 const REQUEST_TIMEOUT = 30000;
 
 // Sleep helper
@@ -31,9 +34,9 @@ function isTemporaryError(status) {
 return [429, 500, 502, 503, 504].includes(status);
 }
 
-// Call a Gemini model
-async function callGemini(prompt, model) {
-console.log(`Calling Gemini model: ${model}`);
+// Call Gemini
+async function callGemini(prompt, apiKey, model, apiName) {
+console.log(`Trying ${apiName} with model: ${model}`);
 
 ```
 const controller = new AbortController();
@@ -44,7 +47,7 @@ const timeoutId = setTimeout(() => {
 
 try {
     const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
             method: "POST",
             headers: {
@@ -68,37 +71,33 @@ try {
     const data = await response.json();
 
     if (response.ok) {
-        console.log(`Gemini model successful: ${model}`);
+        console.log(`Success using ${apiName} + ${model}`);
 
         return {
             success: true,
-            model,
             data
         };
     }
 
     console.error(
-        `Gemini model failed: ${model}`,
-        `Status: ${response.status}`,
+        `${apiName} + ${model} failed with status ${response.status}:`,
         data
     );
 
     return {
         success: false,
-        model,
         status: response.status,
         data
     };
 
 } catch (error) {
     console.error(
-        `Request error for model ${model}:`,
+        `${apiName} + ${model} request error:`,
         error.message
     );
 
     return {
         success: false,
-        model,
         status: error.name === "AbortError" ? 504 : 500,
         error: error.message
     };
@@ -110,74 +109,98 @@ try {
 
 }
 
-// Try primary and backup models
+// Gemini fallback system
 async function askGemini(prompt) {
-const models = [
-PRIMARY_MODEL,
-BACKUP_MODEL
-];
+const configurations = [
+{
+apiKey: PRIMARY_API_KEY,
+apiName: "PRIMARY API",
+model: PRIMARY_MODEL
+},
+{
+apiKey: PRIMARY_API_KEY,
+apiName: "PRIMARY API",
+model: BACKUP_MODEL
+},
+{
+apiKey: BACKUP_API_KEY,
+apiName: "BACKUP API",
+model: PRIMARY_MODEL
+},
+{
+apiKey: BACKUP_API_KEY,
+apiName: "BACKUP API",
+model: BACKUP_MODEL
+}
+].filter(config => config.apiKey);
 
 ```
-let lastError;
-
-// First attempt
-console.log("========== GEMINI ROUND 1 ==========");
-
-for (const model of models) {
-    const result = await callGemini(prompt, model);
-
-    if (result.success) {
-        console.log(`Response generated using: ${model}`);
-        return result.data;
-    }
-
-    lastError = result;
-
-    if (isTemporaryError(result.status)) {
-        console.log(`${model} temporarily unavailable. Trying next model...`);
-        continue;
-    }
-
-    throw new Error(
-        result.data?.error?.message ||
-        result.error ||
-        `Gemini API error: ${result.status}`
-    );
+if (configurations.length === 0) {
+    throw new Error("No Gemini API keys configured");
 }
 
-// Wait before retrying
-console.log("Both Gemini models failed. Waiting 2 seconds before retry...");
-await sleep(2000);
+let lastError;
 
-// Second attempt
-console.log("========== GEMINI ROUND 2 ==========");
+// First round
+console.log("========== GEMINI ROUND 1 ==========");
 
-for (const model of models) {
-    const result = await callGemini(prompt, model);
+for (const config of configurations) {
+    const result = await callGemini(
+        prompt,
+        config.apiKey,
+        config.model,
+        config.apiName
+    );
 
     if (result.success) {
-        console.log(`Response generated using: ${model}`);
         return result.data;
     }
 
     lastError = result;
 
-    if (isTemporaryError(result.status)) {
-        console.log(`${model} still temporarily unavailable.`);
-        continue;
+    if (!isTemporaryError(result.status)) {
+        throw new Error(
+            result.data?.error?.message ||
+            result.error ||
+            `Gemini API error: ${result.status}`
+        );
+    }
+}
+
+// Wait before retry
+console.log("All Gemini configurations failed. Waiting 2 seconds...");
+await sleep(2000);
+
+// Second round
+console.log("========== GEMINI ROUND 2 ==========");
+
+for (const config of configurations) {
+    const result = await callGemini(
+        prompt,
+        config.apiKey,
+        config.model,
+        config.apiName
+    );
+
+    if (result.success) {
+        return result.data;
     }
 
-    throw new Error(
-        result.data?.error?.message ||
-        result.error ||
-        `Gemini API error: ${result.status}`
-    );
+    lastError = result;
+
+    if (!isTemporaryError(result.status)) {
+        throw new Error(
+            result.data?.error?.message ||
+            result.error ||
+            `Gemini API error: ${result.status}`
+        );
+    }
 }
 
 throw new Error(
     lastError?.data?.error?.message ||
     lastError?.error ||
-    "All Gemini models are currently unavailable"
+    "All Gemini API configurations are currently unavailable"
 );
 ```
 
@@ -195,11 +218,9 @@ const prompt = req.body.prompt;
         });
     }
 
-    if (!GEMINI_API_KEY) {
-        console.error("GEMINI_API_KEY is missing");
-
+    if (!PRIMARY_API_KEY) {
         return res.status(500).json({
-            error: "Server configuration error"
+            error: "Primary Gemini API key is missing"
         });
     }
 
