@@ -47,11 +47,12 @@ const timeoutId = setTimeout(() => {
 
 try {
     const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
         {
             method: "POST",
             headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "X-goog-api-key": apiKey
             },
             body: JSON.stringify({
                 contents: [
@@ -218,9 +219,9 @@ const prompt = req.body.prompt;
         });
     }
 
-    if (!PRIMARY_API_KEY) {
+    if (!PRIMARY_API_KEY && !BACKUP_API_KEY) {
         return res.status(500).json({
-            error: "Primary Gemini API key is missing"
+            error: "Gemini API keys are missing"
         });
     }
 
