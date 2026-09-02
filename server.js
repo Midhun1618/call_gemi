@@ -25,7 +25,7 @@ async function callGemini(prompt, apiKey, model) {
 const url =
 "https://generativelanguage.googleapis.com/v1beta/models/" +
 model +
-":generateContent";
+"";
 
 const response = await fetch(url, {
     method: "POST",
@@ -52,6 +52,24 @@ return {
     response: response,
     data: data
 };
+
+}
+
+function cleanGeminiText(text) {
+let cleaned = text.trim();
+
+if (cleaned.startsWith("```json")) {
+    cleaned = cleaned.substring(7).trim();
+} else if (cleaned.startsWith("```")) {
+    cleaned = cleaned.substring(3).trim();
+}
+
+if (cleaned.endsWith("```")) {
+    cleaned = cleaned.substring(0, cleaned.length - 3).trim();
+}
+
+return cleaned;
+
 }
 
 app.post("/ask", async (req, res) => {
@@ -92,7 +110,12 @@ const prompt = req.body.prompt;
 
     for (const config of configurations) {
         if (!config.apiKey) {
-            console.log("Skipping " + config.name + " because API key is missing");
+            console.log(
+                "Skipping " +
+                config.name +
+                " because API key is missing"
+            );
+
             continue;
         }
 
@@ -108,16 +131,18 @@ const prompt = req.body.prompt;
             );
 
             if (!result.response.ok) {
-                console.log(
+                console.error(
                     "Failed: " +
                     config.name +
                     " Status: " +
                     result.response.status
                 );
 
-                console.log("Trying next fallback...");
+                console.error(result.data);
 
                 lastError = result.data;
+
+                console.log("Trying next fallback...");
 
                 continue;
             }
@@ -156,27 +181,49 @@ const prompt = req.body.prompt;
                 continue;
             }
 
-            console.log("Sending successful AI response to app");
+            text = cleanGeminiText(text);
 
-            return res.json({
-                result: text
-            });
+            console.log(
+                "Gemini response from " +
+                config.name +
+                ": " +
+                text
+            );
+
+            try {
+                const parsed = JSON.parse(text);
+
+                console.log(
+                    "Valid JSON received. Sending directly to app."
+                );
+
+                return res.json(parsed);
+
+            } catch (parseError) {
+                console.log(
+                    "Response is not valid JSON."
+                );
+
+                return res.json({
+                    result: text
+                });
+            }
 
         } catch (error) {
             console.error(
-                "Request failed for " +
+                "Error with " +
                 config.name +
                 ": " +
                 error.message
             );
-
-            console.log("Trying next fallback...");
 
             lastError = {
                 error: {
                     message: error.message
                 }
             };
+
+            console.log("Trying next fallback...");
 
             continue;
         }
@@ -190,12 +237,9 @@ const prompt = req.body.prompt;
         });
     }
 
-    console.error("All AI configurations failed");
+    console.error("All Gemini configurations failed.");
 
-    console.error(
-        "Last error:",
-        lastError
-    );
+    console.error("Last error:", lastError);
 
     return res.status(503).json({
         error: "AI service is temporarily unavailable. Please try again later."
@@ -208,7 +252,6 @@ const prompt = req.body.prompt;
         error: "Server error"
     });
 }
-
 
 });
 
